@@ -1,24 +1,17 @@
 import os
-import threading
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import mysql.connector
 
 # Carrega as variáveis do arquivo .env
 load_dotenv()
 
-app = Flask(__name__)
-CORS(app)
-
 def conectar():
-       return psycopg2.connect(
-           host="localhost",
-           user="postgres",
-           password=os.getenv("DB_PASSWORD"),
-           dbname="Sistema_loja_vendas"
-       )
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password=os.getenv("DB_PASSWORD"), # Busca a senha de forma segura
+        database="loja_de_vendas"
+    )
 #Um seprarador de linha, mas para a parte visual
 def separar_linha(tamanho: int = 55) -> None:
     print("__"*tamanho)
@@ -35,126 +28,156 @@ def exibir_menu() -> None:
     print("Exibir relatório de vendas [2]")
     print("Cadastrar novo funcionário [3]")
     print("Pesquisar atendente por ID [4]")
-    print("Apagar cadastro do funcionario [5]")
-    print("Sair [6]")
+    print("Sair [5]")
 #A parte das perguntas para o usúario e também onde o sistema monta o relátorio criado
-@app.route('/api/vendas', methods=['POST'])
-def api_venda():
-    dados = request.json
+def venda():
+    separar_linha()
+    print("CADASTRAR NOVA VENDA")
+    separar_linha()
+    while True:
+        marca_da_roupa = input("Marca da roupa:")
+        if marca_da_roupa:
+            break
+        print("A marca da roupa não pode ficar em branco!")
+    while True:
+        try:
+            preco_da_roupa = float(input("Preço da roupa:"))
+            if preco_da_roupa > 0:
+                break
+            print("A roupa possui preço, verifique a etiqueta!")
+        except ValueError:
+            print("Digite apenas números")
+    while True:
+        id_da_atendente = input("ID da atendente:")
+        if id_da_atendente:
+            break
+        print("Deve possuir o ID")
+    while True:
+        try:
+            desconto_fornecido = int(input("Desconto fornecido:"))
+            if desconto_fornecido:
+                break
+        except ValueError:
+            print("Digite apenas números")
+           
+    total_da_compra = (desconto_fornecido/100)*preco_da_roupa
+
+    separar_linha()
     try:
         conn = conectar() # Sua função de conexão
         cursor = conn.cursor()
-
-        marca = dados.get("marca")
-        preco = float(dados.get("preco"))
-        atendente_id = int(dados.get("atendenteId"))
-        desconto = int(dados.get("desconto"))
-        data = dados.get("data")
         
-        total = (desconto / 100) * preco
+        # O SQL agora recebe os novos campos
+        sql = """INSERT INTO relatorios (marca_da_roupa, preco_da_roupa, id_do_atendente, desconto, total_da_compra) 
+                 VALUES (%s, %s, %s, %s, %s)"""
         
-        # O SQL agora recebe os novos campos, com RETURNING id (equivalente ao lastrowid do MySQL)
-        sql = """INSERT INTO relatorios (marca_da_roupa, preco_da_roupa, id_do_atendente, desconto, total_da_compra, data) 
-                 VALUES (%s, %s, %s, %s, %s, %s) RETURNING id"""
-        
-        cursor.execute(sql, (marca, preco, atendente_id, desconto, total, data))
-        novo_id = cursor.fetchone()[0]
+        cursor.execute(sql, (marca_da_roupa, preco_da_roupa, id_da_atendente, desconto_fornecido, total_da_compra))
         
         conn.commit()
-        return jsonify("Relatório salvo com sucesso!")
+        print("Relatório salvo com sucesso!")
         
-    except psycopg2.Error as e:
-        return jsonify(f"Erro ao salvar: {e}")
+    except mysql.connector.Error as e:
+        print(f"Erro ao salvar: {e}")
     finally:
         cursor.close()
         conn.close()
         
 
 #Salva nomes e IDs dos funcionarios em uma lista
-@app.route('/api/funcionarios', methods=['POST'])
 def registrar_atendente():
-    dados = request.json
+    # Coleta os novos dados
+    nome = input("Nome completo: ")
+    data_nasc = input("Data de nascimento (AAAA-MM-DD): ")
+    endereco = input("Endereço: ")
+    sexo = input("Sexo:")
+    telefone = input("Telefone:")
+    
+
     try:
         conn = conectar() # Sua função de conexão
         cursor = conn.cursor()
         
-        # O SQL agora recebe os novos campos, com RETURNING id (equivalente ao lastrowid do MySQL)
+        # O SQL agora recebe os novos campos
         sql = """INSERT INTO funcionarios (nomes, nascimento, endereco, sexo, telefone) 
-                 VALUES (%s, %s, %s, %s, %s) RETURNING id"""
+                 VALUES (%s, %s, %s, %s, %s)"""
+        
+        cursor.execute(sql, (nome, data_nasc, endereco, sexo, telefone))
 
-        cursor.execute(sql, (
-            dados.get("nome"),
-            dados.get("nascimento"),
-            dados.get("endereco"),
-            dados.get("sexo"),
-            dados.get("telefone")
-        ))
-
-        novo_id = cursor.fetchone()[0]
+        id = cursor.lastrowid
 
         conn.commit()
+        print(f"\nCadastro concluído! O ID do atendente é: {id}")
         
-        return jsonify(f"\nCadastro concluído! O ID do atendente é: {novo_id}"), 201
-        
-    except psycopg2.Error as e:
-        return jsonify(f"Erro ao salvar: {e}"), 500
+    except mysql.connector.Error as e:
+        print(f"Erro ao salvar: {e}")
     finally:
         cursor.close()
         conn.close()
 
-@app.route('/api/relatorios', methods=['GET'])
 def exibir_relatorio_vendas():
     try:
-        data_desejada = request.args.get("Data")
         conn = conectar()
-        cursor = conn.cursor(cursor_factory=RealDictCursor) # equivalente ao dictionary=True do MySQL
-        if data_desejada:
-            cursor.execute("SELECT * FROM relatorios WHERE data = %s", (data_desejada,))
-        else:
-            cursor.execute("SELECT * FROM relatorios")
+        cursor = conn.cursor(dictionary=True) # dictionary=True facilita pegar os dados
+        cursor.execute("SELECT * FROM relatorios")
         vendas = cursor.fetchall()
 
-        return jsonify(vendas)
+        cursor.execute("SELECT SUM(total_da_compra) as lucro_total FROM relatorios")
+        resultado = cursor.fetchone()
+        
+        if not vendas:
+            print("Nenhum relatório registrado.")
+            return
 
-    except psycopg2.Error as e:
-        return jsonify(f"Erro ao buscar: {e}"), 500
+        for item in vendas:
+            print("RELATÓRIOS")
+            print(f"Marca:       {item['marca_da_roupa']}")
+            print(f"Preço da Roupa:   {item['preco_da_roupa']}")
+            print(f"Id do(a) Atendente:   {item['id']}")
+            print(f"Desconto:  {item['desconto']}")
+            print(f"Total:  {item['total_da_compra']}")
+            separar_linha()
+
+        lucro = resultado['lucro_total'] if resultado['lucro_total'] else 0
+        print(f"Lucro diário total: R$ {lucro:.2f}")
+
+    except mysql.connector.Error as e:
+        print(f"Erro ao buscar: {e}")
     finally:
         if 'cursor' in locals() and cursor:
             cursor.close()
         if 'conn' in locals() and conn:
             conn.close()
 
-@app.route('/api/funcionarios', methods=['GET'])
 def buscar_atendente_por_id():
-    try:
-        conn = conectar() # Sua função de conexão que já criamos
-        cursor = conn.cursor(cursor_factory=RealDictCursor) # equivalente ao dictionary=True do MySQL
-        cursor.execute("SELECT id, nomes AS nome, nascimento, endereco, sexo, telefone FROM funcionarios")
-        funcionarios = cursor.fetchall()
-        return jsonify(funcionarios), 200
-    except psycopg2.Error as e:
-        return jsonify({"erro": str(e)}), 500
-    finally:
-        if 'cursor' in locals() and cursor: cursor.close()
-        if 'conn' in locals() and conn: conn.close()
-
-@app.route('/api/funcionarios/<int:id>', methods=['DELETE'])
-def apagar_cadastro(id):
+    id_procura = input("Digite o ID do atendente que deseja consultar: ")
+    
     try:
         conn = conectar() # Sua função de conexão que já criamos
         cursor = conn.cursor()
-        sql = "DELETE FROM funcionarios WHERE id = %s"
         
-        cursor.execute(sql, (id,))
+        # O SQL busca apenas o registro onde o id_atendente for igual ao digitado
+        sql = "SELECT nomes, nascimento, endereco, sexo, telefone FROM funcionarios WHERE id = %s"
+        
+        cursor.execute(sql, (id_procura,))
+        resultado = cursor.fetchone() # Traz apenas o primeiro resultado encontrado
+        
+        if resultado:
+            print("\n FICHA DO FUNCIONÁRIO ")
+            print(f"Nome:       {resultado[0]}")
+            print(f"Nascimento:   {resultado[1]}")
+            print(f"Endereço:   {resultado[2]}")
+            print(f"Sexo:  {resultado[3]}")
+            print(f"Telefone:  {resultado[4]}")
+            separar_linha()
+        else:
+            print("\nERRO: Nenhum funcionário encontrado com esse ID.")
+            
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        print(f"Erro ao acessar o banco de dados: {e}")
 
-        conn.commit()
-        return jsonify("Funcionario apagado com sucesso!"), 200
-    except psycopg2.Error as e:
-        return jsonify({"erro": str(e)}), 500
-    finally:
-        if 'cursor' in locals() and cursor: cursor.close()
-        if 'conn' in locals() and conn: conn.close()
-    
 def menu_principal() -> None:
     while True:
         exibir_menu()
@@ -165,14 +188,13 @@ def menu_principal() -> None:
             continue
         if opcao == 1:
             while True:
-                api_venda()
+                venda()
                 if not confirmacao("Deseja cadastrar uma nova venda?"):
                     break
         elif opcao == 2:
             while True:
                 exibir_relatorio_vendas()
-                if not confirmacao("Deseja ver outra data?"):
-                    break
+                break
         elif opcao == 3:
             while True:
                 registrar_atendente()
@@ -180,26 +202,10 @@ def menu_principal() -> None:
                     break
                 return
         elif opcao == 4:
-            while True:
-                buscar_atendente_por_id()
-                if not confirmacao("Deseja buscar outro atendente?"):
-                    break
-                return
+            buscar_atendente_por_id()
+            break
         elif opcao == 5:
-            while True:
-                apagar_cadastro()
-                if not confirmacao("Deseja apagar outro cadastro?"):
-                    break
-        elif opcao == 6:
             print("Até logo!")
             break
 if __name__ == "__main__":
-    # Inicia o servidor Flask em uma thread separada para não travar o terminal
-    servidor_thread = threading.Thread(target=lambda: app.run(debug=False, port=5000, use_reloader=False))
-    servidor_thread.daemon = True
-    servidor_thread.start()
-    
-    print("\n[Servidor Web / API rodando em http://localhost:5000]")
-    
-    # Roda o seu menu tradicional de terminal simultaneamente
     menu_principal()
